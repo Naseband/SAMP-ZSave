@@ -66,7 +66,7 @@
 // ------------------------------------------------------------------------------------ Vars & Enumerators
 
 static FormatSpecifiers[] = 
-	"&c\tText/Comment (from /Z)\n"\
+	"&c - Text/Comment (from /Z)\n"\
 	"\n"\
 	"&ps - Player State\n"\
 	"&ph - Player Health\n"\
@@ -182,6 +182,15 @@ public OnGameModeInit()
 public OnGameModeExit()
 {
 	OnFilterScriptExit();
+
+	return 1;
+}
+
+public OnPlayerConnect(playerid)
+{
+	FTmpID[playerid] = 0;
+	FTmpName[playerid][0] = 0;
+	FTmpFormat[playerid][0] = 0;
 
 	return 1;
 }
@@ -343,7 +352,6 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 			if(!len || len > MAX_Z_FORMAT_NAME) return DialogFormatEditName(playerid);
 
 			format(FTmpName[playerid], MAX_Z_FORMAT_NAME + 1, inputtext);
-			FTmpFormat[playerid][0] = 0;
 
 			DialogFormatEditNameC(playerid);
 		}
@@ -360,6 +368,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 		if(response)
 		{
 			FormatTypes[FTmpID[playerid]][zfName] = FTmpName[playerid];
+
 			if(!SaveFormatTypes()) SendClientMessage(playerid, -1, "[zSave] Error: Failed to save format types.");
 
 			SendClientMessage(playerid, -1, "[zSave] Name updated.");
@@ -383,7 +392,6 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 			if(!len || len > MAX_Z_FORMAT_LEN) return DialogFormatEditFormat(playerid);
 
 			format(FTmpFormat[playerid], MAX_Z_FORMAT_LEN + 1, inputtext);
-			FTmpName[playerid][0] = 0;
 
 			DialogFormatEditFormatC(playerid);
 		}
@@ -400,6 +408,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 		if(response)
 		{
 			FormatTypes[FTmpID[playerid]][zfFormat] = FTmpFormat[playerid];
+
 			if(!SaveFormatTypes()) SendClientMessage(playerid, -1, "[zSave] Error: Failed to save format types.");
 
 			SendClientMessage(playerid, -1, "[zSave] Format updated.");
@@ -469,8 +478,8 @@ LoadFormatTypes()
 
 			if(pos <= 0) continue;
 
-			strmid(FormatTypes[id][zfName], text, 0, pos, MAX_Z_FORMAT_NAME);
-			strmid(FormatTypes[id][zfFormat], text, pos + 1, len, MAX_Z_FORMAT_LEN);
+			strmid(FormatTypes[id][zfName], text, 0, pos, MAX_Z_FORMAT_NAME + 1);
+			strmid(FormatTypes[id][zfFormat], text, pos + 1, len, MAX_Z_FORMAT_LEN + 1);
 
 			id ++;
 		}
@@ -576,8 +585,6 @@ COMMAND:z(playerid, params[])
 
 	if(!zfValid(FormatType)) return SendClientMessage(playerid, -1, "[zSave] Error: No valid FormatType set, use /zformat first");
 
-	new ms = GetTickCount();
-
 	bigstring[0] = 0;
 	strcat(bigstring, FormatTypes[FormatType][zfFormat]);
 
@@ -636,6 +643,8 @@ COMMAND:z(playerid, params[])
 	GetPlayerCameraPos(playerid, cpx, cpy, cpz);
 	GetPlayerCameraFrontVector(playerid, cvx, cvy, cvz);
 
+	// Order is important here
+
 	zformat_replace_f(bigstring, "&gx", gx);
 	zformat_replace_f(bigstring, "&gy", gy);
 	zformat_replace_f(bigstring, "&gz", gz);
@@ -650,9 +659,18 @@ COMMAND:z(playerid, params[])
 	zformat_replace_i(bigstring, "&int", interior);
 	zformat_replace_i(bigstring, "&vw", virtualworld);
 
-	zformat_replace_f(bigstring, "&x", posx);
-	zformat_replace_f(bigstring, "&y", posy);
-	zformat_replace_f(bigstring, "&z", posz);
+	zformat_replace_f(bigstring, "&cpx", cpx);
+	zformat_replace_f(bigstring, "&cpy", cpy);
+	zformat_replace_f(bigstring, "&cpz", cpz);
+
+	zformat_replace_f(bigstring, "&cvx", cvx);
+	zformat_replace_f(bigstring, "&cvy", cvy);
+	zformat_replace_f(bigstring, "&cvz", cvz);
+
+	zformat_replace_f(bigstring, "&qw", vquatw);
+	zformat_replace_f(bigstring, "&qx", vquatx);
+	zformat_replace_f(bigstring, "&qy", vquaty);
+	zformat_replace_f(bigstring, "&qz", vquatz);
 
 	zformat_replace_f(bigstring, "&rx", rotx);
 	zformat_replace_f(bigstring, "&ry", roty);
@@ -662,21 +680,12 @@ COMMAND:z(playerid, params[])
 	zformat_replace_f(bigstring, "&vy", vely);
 	zformat_replace_f(bigstring, "&vz", velz);
 
+	zformat_replace_f(bigstring, "&x", posx);
+	zformat_replace_f(bigstring, "&y", posy);
+	zformat_replace_f(bigstring, "&z", posz);
+
 	zformat_replace_i(bigstring, "&s", smodel);
 	zformat_replace_i(bigstring, "&m", vmodel);
-	
-	zformat_replace_f(bigstring, "&qw", vquatw);
-	zformat_replace_f(bigstring, "&qx", vquatx);
-	zformat_replace_f(bigstring, "&qy", vquaty);
-	zformat_replace_f(bigstring, "&qz", vquatz);
-
-	zformat_replace_f(bigstring, "&cpx", cpx);
-	zformat_replace_f(bigstring, "&cpy", cpy);
-	zformat_replace_f(bigstring, "&cpz", cpz);
-
-	zformat_replace_f(bigstring, "&cvx", cvx);
-	zformat_replace_f(bigstring, "&cvy", cvy);
-	zformat_replace_f(bigstring, "&cvz", cvz);
 
 	format(tmp, sizeof(tmp), "%d:%02d:%02d", t_h, t_m, t_s);
 	zformat_replace(bigstring, "&t", tmp);
@@ -708,8 +717,6 @@ COMMAND:z(playerid, params[])
 	fwrite(FOut, "\r\n");
 
 	fclose(FOut);
-
-	printf("Time: %dms", GetTickCount() - ms);
 
 	return 1;
 }
