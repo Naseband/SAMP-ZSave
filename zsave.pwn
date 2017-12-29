@@ -31,41 +31,6 @@
 //		Saves a coordinate to the selected file with (text/command is optional, but a possible format specifier).
 //
 //
-// Format Type Specifiers:
-//
-//		&c 		Text/Comment (from /z)
-//
-//		&x 		Position X
-//		&y 		Position Y
-//		&z 		Position Z
-//
-//		&rx 	Rotation X
-//		&ry 	Rotation Y
-//		&rz 	Rotation Z (also facing angle on-foot)
-//
-//		&vx 	Velocity X
-//		&vy 	Velocity Y
-//		&vz 	Velocity Z
-//
-//		&s 		Skin ID
-//		&m 		Vehicle Model
-//
-//		&qw 	Vehicle Quat W
-//		&qx 	Vehicle Quat X
-//		&qy 	Vehicle Quat Y
-//		&qz 	Vehicle Quat Z
-//
-//		&cpx 	Camera Pos X
-//		&cpy 	Camera Pos Y
-//		&cpz 	Camera Pos Z
-//
-//		&cvx 	Camera Vector X
-//		&cvy 	Camera Vector Y
-//		&cvz 	Camera Vector Z
-//
-//		&t 		Current Time (hh:mm:ss)
-//		&d 		Current Date (dd.mm.yyyy)
-//
 // 		Note: Format specifiers that are for vehicles/on-foot only will be zero (0.0) when used in a wrong state.
 //
 //
@@ -73,9 +38,13 @@
 
 
 #define FILTERSCRIPT
+#define ENABLE_CA 			1
 
 #include <a_samp>
 #include <zcmd>
+#if ENABLE_CA == 1
+#include <ColAndreas>
+#endif
 
 // ------------------------------------------------------------------------------------ Config/Defines
 
@@ -88,7 +57,44 @@
 #define MAX_Z_FORMAT_LEN	128 // Formats longer than 128 characters cannot be added ingame because of the dialog inputtext limit
 #define MAX_Z_FILENAME		128
 
+// Level PVAR - If your Gamemode/Admin FS uses PVars to Store Admin Levels,
+//  adjust the following so that this script can grant access to non-RCON Admins
+#define USE_ADMIN_PVAR		false
+#define ADMIN_PVAR_NAME 	"AdminLevel"
+#define ADMIN_PVAR_LEVEL 	6
+
 // ------------------------------------------------------------------------------------ Vars & Enumerators
+
+static FormatSpecifiers[] = 
+	"&c\tText/Comment (from /Z)\n"\
+	"\n"\
+	"&ps - Player State\n"\
+	"&ph - Player Health\n"\
+	"&pa - Player Armour\n"\
+	"&vw - Virtual World\n"\
+	"&int - Interior ID\n"\
+	"\n"\
+	"&s - Skin ID\n"\
+	"&m - Vehicle Model\n"\
+	"\n"\
+	"&x  &y  &z - Position X, Y, Z\n"\
+	"\n"\
+	"&rx  &ry  &rz - Rotation X, Y, Z\n"\
+	"\n"\
+	"&vx  &vy  &vz - Velocity X, Y, Z\n"\
+	"\n"\
+	"&qw  &qx  &qy  &qz - Vehicle Quat W, X, Y, Z\n"\
+	"\n"\
+	"&cpx  &cpy  &cpz - Cam Position X, Y, Z\n"\
+	"&cvx  &cvy  &cvz - Cam Vector X, Y, Z\n"\
+	"\n"\
+	"&t - Current Time\n"\
+	"&d - Current Date\n"\
+	"\n"\
+	"&gx  &gy  &gz - Ground X, Y, Z (uses ColAndreas)\n"\
+	"&grx  &gry  &grz - Ground Angle X, Y, Z\n"\
+	"\nNote: Specifiers that aren't available will be 0 or 0.0."
+;
 
 enum
 {
@@ -106,8 +112,6 @@ enum
 	DID_F_EDIT_DELETE
 };
 
-#define zfValid(%1) (%1 >= 0 && %1 < MAX_Z_FORMAT_TYPES && FormatTypes[%1][zfName][0] != 0 ? 1 : 0)
-
 enum E_FORMAT_TYPES
 {
 	zfName[MAX_Z_FORMAT_NAME + 1], // Empty = non-existant
@@ -115,9 +119,30 @@ enum E_FORMAT_TYPES
 };
 new FormatTypes[MAX_Z_FORMAT_TYPES][E_FORMAT_TYPES];
 
-new bool:Initialized, FileName[MAX_Z_FILENAME], FormatType = -1, FTmpName[MAX_PLAYERS][MAX_Z_FORMAT_NAME + 1], FTmpFormat[MAX_PLAYERS][MAX_Z_FORMAT_LEN + 1], FTmpID[MAX_PLAYERS];
+new bool:Initialized, FileName[MAX_Z_FILENAME] = "zdefault.txt", FormatType = -1, FTmpName[MAX_PLAYERS][MAX_Z_FORMAT_NAME + 1], FTmpFormat[MAX_PLAYERS][MAX_Z_FORMAT_LEN + 1], FTmpID[MAX_PLAYERS];
 
 new bigstring[1200];
+
+// ------------------------------------------------------------------------------------ Macros/Conditionally Compiled Functions
+
+#define zfValid(%1) (%1 >= 0 && %1 < MAX_Z_FORMAT_TYPES && FormatTypes[%1][zfName][0] != 0 ? 1 : 0)
+
+#if USE_ADMIN_PVAR == true 
+
+CheckPlayerAdmin(playerid)
+{
+	if(IsPlayerAdmin(playerid)) return 1;
+
+	if(GetPVarInt(playerid, ADMIN_PVAR_NAME) >= ADMIN_PVAR_LEVEL) return 1;
+
+	return 0;
+}
+
+#else
+
+#define CheckPlayerAdmin IsPlayerAdmin
+
+#endif
 
 // ------------------------------------------------------------------------------------ Public Functions
 
@@ -126,7 +151,6 @@ public OnFilterScriptInit()
 	if(Initialized) return 1;
 
 	LoadFormatTypes();
-	FileName[0] = 0;
 	FormatType = -1;
 
 	Initialized = true;
@@ -134,7 +158,7 @@ public OnFilterScriptInit()
 	new count;
 	for(new i = 0; i < MAX_Z_FORMAT_TYPES; i ++) if(zfValid(i)) count ++;
 
-	printf("\nzSave by NaS initialized.\n> %d/"#MAX_Z_FORMAT_TYPES" Format Types loaded.\n", count);
+	printf("\nzSave v1.0 initialized.\n> %d/"#MAX_Z_FORMAT_TYPES" Format Types loaded.\n", count);
 
 	return 1;
 }
@@ -169,6 +193,8 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
 public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
+	if(!CheckPlayerAdmin(playerid)) return 0;
+
 	if(dialogid == DID_F_SEL)
 	{
 		if(response)
@@ -483,9 +509,11 @@ SaveFormatTypes()
 
 COMMAND:zfile(playerid, params[])
 {
+	if(!CheckPlayerAdmin(playerid)) return 0;
+
 	if(strlen(params) >= MAX_Z_FILENAME) return SendClientMessage(playerid, -1, "[zSave] Error: Input too long");
 
-	if(strlen(params) == 0)
+	if(isnull(params))
 	{
 		if(FileName[0] == 0) SendClientMessage(playerid, -1, "[zSave] No FileName set");
 		else
@@ -510,13 +538,31 @@ COMMAND:zfile(playerid, params[])
 
 COMMAND:zformat(playerid, params[])
 {
-	DialogFormatType(playerid);
+	if(!CheckPlayerAdmin(playerid)) return 0;
+
+	if(isnull(params)) return DialogFormatType(playerid), 1;
+
+	if(strlen(params) > 6) return SendClientMessage(playerid, -1, "[zSave] Error: /zformat (id) - Invalid ID"), 1;
+
+	new id = strval(params);
+
+	if(zfValid(id))
+	{
+		new text[MAX_Z_FORMAT_NAME + 26];
+		format(text, sizeof(text), "[zSave] New Format Type: \"%s\"", FormatTypes[id][zfName]);
+		SendClientMessage(playerid, -1, text);
+
+		FormatType = id;
+	}
+	else SendClientMessage(playerid, -1, "[zSave] Error: /zformat (id) - Invalid ID");
 
 	return 1;
 }
 
 COMMAND:zfedit(playerid, params[])
 {
+	if(!CheckPlayerAdmin(playerid)) return 0;
+
 	DialogFormatEditList(playerid);
 
 	return 1;
@@ -524,23 +570,35 @@ COMMAND:zfedit(playerid, params[])
 
 COMMAND:z(playerid, params[])
 {
+	if(!CheckPlayerAdmin(playerid)) return 0;
+
 	if(FileName[0] == 0) return SendClientMessage(playerid, -1, "[zSave] Error: No FileName set, use /zformat first");
 
 	if(!zfValid(FormatType)) return SendClientMessage(playerid, -1, "[zSave] Error: No valid FormatType set, use /zformat first");
 
+	new ms = GetTickCount();
+
 	bigstring[0] = 0;
 	strcat(bigstring, FormatTypes[FormatType][zfFormat]);
 
-	new Float:posx, Float:posy, Float:posz, 
+	new playerstate, Float:health, Float:armour, interior, virtualworld,
+		Float:posx, Float:posy, Float:posz, 
 		Float:rotx, Float:roty, Float:rotz,
 		Float:velx, Float:vely, Float:velz,
 		smodel, vmodel,
 		Float:vquatw, Float:vquatx, Float:vquaty, Float:vquatz,
 		Float:cpx, Float:cpy, Float:cpz, Float:cvx, Float:cvy, Float:cvz,
-		t_h, t_m, t_s, d_y, d_m, d_d, tmp[20];
+		t_h, t_m, t_s, d_y, d_m, d_d, tmp[20],
+		Float:gx, Float:gy, Float:gz, Float:grx, Float:gry, Float:grz;
 
 	gettime(t_h, t_m, t_s);
 	getdate(d_y, d_m, d_d);
+
+	playerstate = GetPlayerState(playerid);
+	GetPlayerHealth(playerid, health);
+	GetPlayerArmour(playerid, armour);
+	interior = GetPlayerInterior(playerid);
+	virtualworld = GetPlayerVirtualWorld(playerid);
 
 	new vid = GetPlayerVehicleID(playerid);
 
@@ -571,8 +629,26 @@ COMMAND:z(playerid, params[])
 		smodel = GetPlayerSkin(playerid);
 	}
 
+	#if ENABLE_CA == 1
+	CA_RayCastLineAngle(posx, posy, posz, posx, posy, posz - 350.0, gx, gy, gz, grx, gry, grz);
+	#endif
+
 	GetPlayerCameraPos(playerid, cpx, cpy, cpz);
 	GetPlayerCameraFrontVector(playerid, cvx, cvy, cvz);
+
+	zformat_replace_f(bigstring, "&gx", gx);
+	zformat_replace_f(bigstring, "&gy", gy);
+	zformat_replace_f(bigstring, "&gz", gz);
+
+	zformat_replace_f(bigstring, "&grx", grx);
+	zformat_replace_f(bigstring, "&gry", gry);
+	zformat_replace_f(bigstring, "&grz", grz);
+
+	zformat_replace_i(bigstring, "&ps", playerstate);
+	zformat_replace_f(bigstring, "&ph", health);
+	zformat_replace_f(bigstring, "&pa", armour);
+	zformat_replace_i(bigstring, "&int", interior);
+	zformat_replace_i(bigstring, "&vw", virtualworld);
 
 	zformat_replace_f(bigstring, "&x", posx);
 	zformat_replace_f(bigstring, "&y", posy);
@@ -633,6 +709,8 @@ COMMAND:z(playerid, params[])
 
 	fclose(FOut);
 
+	printf("Time: %dms", GetTickCount() - ms);
+
 	return 1;
 }
 
@@ -682,7 +760,7 @@ DialogFormatType(playerid)
 
 	for(new i = 0; i < MAX_Z_FORMAT_TYPES; i ++) if(zfValid(i))
 	{
-		format(bigstring, sizeof(bigstring), "%s%s%d\t%s\n", bigstring, FormatType == i ? ("{00FF00}") : (""), i, FormatTypes[i][zfName]);
+		format(bigstring, sizeof(bigstring), "%s%d\t%s%s\n", bigstring, i, FormatType == i ? ("{77FF00}") : (""), FormatTypes[i][zfName]);
 	}
 
 	ShowPlayerDialog(playerid, DID_F_SEL, DIALOG_STYLE_TABLIST_HEADERS, "Select a Format Type", bigstring, "Select", "Close");
@@ -732,43 +810,7 @@ DialogFormatEditNameC(playerid)
 
 DialogFormatEditFormat(playerid)
 {
-	static string[] = 
-		"Type the Format for the Format Type (1-"#MAX_Z_FORMAT_LEN" char.).\n\nYou can use the following specifiers:\n"\
-		"&c\tText/Comment (from /Z)\n"\
-		"\n"\
-		"&x\tPosition X\n"\
-		"&y\tPosition Y\n"\
-		"&z\tPosition Z\n"\
-		"\n"\
-		"&rx\tRotation X\n"\
-		"&ry\tRotation Y\n"\
-		"&rz\tRotation Z\n"\
-		"\n"\
-		"&vx\tVelocity X\n"\
-		"&vy\tVelocity Y\n"\
-		"&vz\tVelocity Z\n"\
-		"\n"\
-		"&s\tSkin ID\n"\
-		"&m\tVehicle Model\n"\
-		"\n"\
-		"&qw\tVehicle Quat W\n"\
-		"&qx\tVehicle Quat X\n"\
-		"&qy\tVehicle Quat Y\n"\
-		"&qz\tVehicle Quat Z\n"\
-		"\n"\
-		"&cpx\tCamera Pos X\n"\
-		"&cpy\tCamera Pos Y\n"\
-		"&cpz\tCamera Pos Z\n"\
-		"&cvx\tCamera Vector X\n"\
-		"&cvy\tCamera Vector Y\n"\
-		"&cvz\tCamera Vector Z\n"\
-		"\n"\
-		"&t\tCurrent Time\n"\
-		"&d\tCurrent Date\n"\
-		"\nNote: Specifiers that aren't available will be 0 or 0.0."
-	;
-
-	format(bigstring, sizeof(bigstring), "%s\n\nThe current Format is:\n{FFFFFF}%s", string, FormatTypes[FTmpID[playerid]][zfFormat]);
+	format(bigstring, sizeof(bigstring), "Type the Format for the Format Type (1-"#MAX_Z_FORMAT_LEN" char.).\n\nYou can use the following specifiers:\n\n%s\n\nThe current Format is:\n{FFFFFF}%s", FormatSpecifiers, FormatTypes[FTmpID[playerid]][zfFormat]);
 
 	ShowPlayerDialog(playerid, DID_F_EDIT_FORMAT, DIALOG_STYLE_INPUT, "Format", bigstring, "Edit", "Back");
 
@@ -797,43 +839,9 @@ DialogFormatAdd(playerid, page = 1)
 	if(page == 1) ShowPlayerDialog(playerid, DID_F_ADD_NAME, DIALOG_STYLE_INPUT, "Name", "Type the Name for the new Format Type (1-"#MAX_Z_FORMAT_NAME" char.):", "Next", "Back");
 	else if(page == 2)
 	{
-		static string[] = 
-			"Type the Format for the Format Type (1-"#MAX_Z_FORMAT_LEN" char.).\n\nYou can use the following specifiers:\n"\
-			"&c\tText/Comment (from /Z)\n"\
-			"\n"\
-			"&x\tPosition X\n"\
-			"&y\tPosition Y\n"\
-			"&z\tPosition Z\n"\
-			"\n"\
-			"&rx\tRotation X\n"\
-			"&ry\tRotation Y\n"\
-			"&rz\tRotation Z\n"\
-			"\n"\
-			"&vx\tVelocity X\n"\
-			"&vy\tVelocity Y\n"\
-			"&vz\tVelocity Z\n"\
-			"\n"\
-			"&s\tSkin ID\n"\
-			"&m\tVehicle Model\n"\
-			"\n"\
-			"&qw\tVehicle Quat W\n"\
-			"&qx\tVehicle Quat X\n"\
-			"&qy\tVehicle Quat Y\n"\
-			"&qz\tVehicle Quat Z\n"\
-			"\n"\
-			"&cpx\tCamera Pos X\n"\
-			"&cpy\tCamera Pos Y\n"\
-			"&cpz\tCamera Pos Z\n"\
-			"&cvx\tCamera Vector X\n"\
-			"&cvy\tCamera Vector Y\n"\
-			"&cvz\tCamera Vector Z\n"\
-			"\n"\
-			"&t\tCurrent Time\n"\
-			"&d\tCurrent Date\n"\
-			"\nNote: Specifiers that aren't available will be 0 or 0.0."
-		;
+		format(bigstring, sizeof(bigstring), "Type the Format for the Format Type (1-"#MAX_Z_FORMAT_LEN" char.).\n\nYou can use the following specifiers:\n\n%s", FormatSpecifiers);
 
-		ShowPlayerDialog(playerid, DID_F_ADD_FORMAT, DIALOG_STYLE_INPUT, "Format", string, "Next", "Back");
+		ShowPlayerDialog(playerid, DID_F_ADD_FORMAT, DIALOG_STYLE_INPUT, "Format", bigstring, "Next", "Back");
 	}
 	else if(page == 3)
 	{
