@@ -2,7 +2,7 @@
 //                                                                                                                                                  //
 //                                     //////////  //////////   ////////   //      //  //////////                                                   //
 //                                           //    //          //      //   //    //   //                                                           //
-/////////////////////////////////////////////      //////////  //////////    //  //    ///////////////////////////////////////////////////////////////
+/////////////////////////////////////////////      //////////  //////////    //  //    /////--////////////////////////////////////////////////////////
 //                                       //                //  //      //     ////     //                                                           //
 //                                     //////////  //////////  //      //      //      //////////  v1.0  by NaS                                     //
 //                                                                                                                                                  //
@@ -38,11 +38,12 @@
 
 
 #define FILTERSCRIPT
-#define ENABLE_CA 			1
+#define ENABLE_CA 			false
 
 #include <a_samp>
 #include <zcmd>
-#if ENABLE_CA == 1
+
+#if ENABLE_CA == true
 #include <ColAndreas>
 #endif
 
@@ -51,6 +52,7 @@
 #define BASE_DIALOG_ID		27000
 
 #define FILE_FORMAT_TYPES 	"zsave_format_types.txt"
+#define FILE_DEFAULT_OUTPUT "zsave_default_output.txt"
 
 #define MAX_Z_FORMAT_TYPES	32
 #define MAX_Z_FORMAT_NAME 	32
@@ -63,6 +65,11 @@
 #define ADMIN_PVAR_NAME 	"AdminLevel"
 #define ADMIN_PVAR_LEVEL 	6
 
+// Lock to Folder - If you don't want anyone to be able to write to files outside of a specific folder,
+//  enable this and configure the path
+#define LOCK_TO_FOLDER		false
+#define LOCK_PATH			"zsave/" // Does not exist by default!
+
 // ------------------------------------------------------------------------------------ Vars & Enumerators
 
 static FormatSpecifiers[] = 
@@ -73,6 +80,7 @@ static FormatSpecifiers[] =
 	"&pa - Player Armour\n"\
 	"&vw - Virtual World\n"\
 	"&int - Interior ID\n"\
+	"&pn - Player Name\n"\
 	"\n"\
 	"&s - Skin ID\n"\
 	"&m - Vehicle Model\n"\
@@ -119,7 +127,7 @@ enum E_FORMAT_TYPES
 };
 new FormatTypes[MAX_Z_FORMAT_TYPES][E_FORMAT_TYPES];
 
-new bool:Initialized, FileName[MAX_Z_FILENAME] = "zdefault.txt", FormatType = -1, FTmpName[MAX_PLAYERS][MAX_Z_FORMAT_NAME + 1], FTmpFormat[MAX_PLAYERS][MAX_Z_FORMAT_LEN + 1], FTmpID[MAX_PLAYERS];
+new bool:Initialized, FileName[MAX_PLAYERS][MAX_Z_FILENAME], FormatType[MAX_PLAYERS] = {-1, ...}, FTmpName[MAX_PLAYERS][MAX_Z_FORMAT_NAME + 1], FTmpFormat[MAX_PLAYERS][MAX_Z_FORMAT_LEN + 1], FTmpID[MAX_PLAYERS];
 
 new bigstring[1200];
 
@@ -151,7 +159,8 @@ public OnFilterScriptInit()
 	if(Initialized) return 1;
 
 	LoadFormatTypes();
-	FormatType = -1;
+
+	for(new i = 0; i < MAX_PLAYERS; i ++) if(IsPlayerConnected(i)) OnPlayerConnect(i);
 
 	Initialized = true;
 
@@ -191,6 +200,9 @@ public OnPlayerConnect(playerid)
 	FTmpID[playerid] = 0;
 	FTmpName[playerid][0] = 0;
 	FTmpFormat[playerid][0] = 0;
+	FileName[playerid][0] = 0;
+	strcat(FileName[playerid], FILE_DEFAULT_OUTPUT, MAX_Z_FILENAME);
+	FormatType[playerid] = -1;
 
 	return 1;
 }
@@ -220,7 +232,11 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 
 			if(!zfValid(id)) return DialogFormatType(playerid);
 
-			FormatType = id;
+			FormatType[playerid] = id;
+
+			new text[MAX_Z_FORMAT_NAME + 35];
+			format(text, sizeof(text), "[zSave] Format Type is now: \"%s\"", FormatTypes[id][zfName]);
+			SendClientMessage(playerid, -1, text);
 
 			DialogFormatType(playerid);
 		}
@@ -524,19 +540,40 @@ COMMAND:zfile(playerid, params[])
 
 	if(isnull(params))
 	{
-		if(FileName[0] == 0) SendClientMessage(playerid, -1, "[zSave] No FileName set");
+		if(FileName[playerid][0] == 0) SendClientMessage(playerid, -1, "[zSave] No FileName set");
 		else
 		{
 			new text[MAX_Z_FILENAME + 30];
-			format(text, sizeof(text), "[zSave] Current FileName: \"%s\"", FileName);
+			format(text, sizeof(text), "[zSave] Current FileName: \"%s\"", FileName[playerid]);
 			SendClientMessage(playerid, -1, text);
 		}
 
 		return 1;
 	}
 
-	FileName[0] = 0;
-	strcat(FileName, params);
+	if(strcmp(FILE_FORMAT_TYPES, params, true) == 0) // Prevents writing to the format types file
+	{
+		SendClientMessage(playerid, -1, "[zSave] Error: This file is reserved for saving internal data.");
+
+		return 1;
+	}
+
+	FileName[playerid][0] = 0;
+
+	#if LOCK_TO_FOLDER == true // Checks for the LOCK_TO_FOLDER define
+
+		if(strfind(params, "/", true) != -1)
+		{
+			SendClientMessage(playerid, -1, "[zSave] Error: You cannot switch folders without permission.");
+
+			return 1;
+		}
+
+		strcat(FileName[playerid], LOCK_PATH, MAX_Z_FILENAME); // Sets the path to the defined one
+
+	#endif
+
+	strcat(FileName[playerid], params, MAX_Z_FILENAME);
 
 	new text[MAX_Z_FILENAME + 30];
 	format(text, sizeof(text), "[zSave] New FileName: \"%s\"", params);
@@ -557,11 +594,11 @@ COMMAND:zformat(playerid, params[])
 
 	if(zfValid(id))
 	{
-		new text[MAX_Z_FORMAT_NAME + 26];
-		format(text, sizeof(text), "[zSave] New Format Type: \"%s\"", FormatTypes[id][zfName]);
+		new text[MAX_Z_FORMAT_NAME + 35];
+		format(text, sizeof(text), "[zSave] Format Type is now: \"%s\"", FormatTypes[id][zfName]);
 		SendClientMessage(playerid, -1, text);
 
-		FormatType = id;
+		FormatType[playerid] = id;
 	}
 	else SendClientMessage(playerid, -1, "[zSave] Error: /zformat (id) - Invalid ID");
 
@@ -581,12 +618,12 @@ COMMAND:z(playerid, params[])
 {
 	if(!CheckPlayerAdmin(playerid)) return 0;
 
-	if(FileName[0] == 0) return SendClientMessage(playerid, -1, "[zSave] Error: No FileName set, use /zformat first");
+	if(FileName[playerid][0] == 0) return SendClientMessage(playerid, -1, "[zSave] Error: No valid FileName set, use /zfile first");
 
-	if(!zfValid(FormatType)) return SendClientMessage(playerid, -1, "[zSave] Error: No valid FormatType set, use /zformat first");
+	if(!zfValid(FormatType[playerid])) return SendClientMessage(playerid, -1, "[zSave] Error: No valid FormatType set, use /zformat first");
 
 	bigstring[0] = 0;
-	strcat(bigstring, FormatTypes[FormatType][zfFormat]);
+	strcat(bigstring, FormatTypes[FormatType[playerid]][zfFormat]);
 
 	new playerstate, Float:health, Float:armour, interior, virtualworld,
 		Float:posx, Float:posy, Float:posz, 
@@ -595,7 +632,7 @@ COMMAND:z(playerid, params[])
 		smodel, vmodel,
 		Float:vquatw, Float:vquatx, Float:vquaty, Float:vquatz,
 		Float:cpx, Float:cpy, Float:cpz, Float:cvx, Float:cvy, Float:cvz,
-		t_h, t_m, t_s, d_y, d_m, d_d, tmp[20],
+		t_h, t_m, t_s, d_y, d_m, d_d, tmp[30],
 		Float:gx, Float:gy, Float:gz, Float:grx, Float:gry, Float:grz;
 
 	gettime(t_h, t_m, t_s);
@@ -636,7 +673,7 @@ COMMAND:z(playerid, params[])
 		smodel = GetPlayerSkin(playerid);
 	}
 
-	#if ENABLE_CA == 1
+	#if ENABLE_CA == true
 	CA_RayCastLineAngle(posx, posy, posz, posx, posy, posz - 350.0, gx, gy, gz, grx, gry, grz);
 	#endif
 
@@ -658,6 +695,9 @@ COMMAND:z(playerid, params[])
 	zformat_replace_f(bigstring, "&pa", armour);
 	zformat_replace_i(bigstring, "&int", interior);
 	zformat_replace_i(bigstring, "&vw", virtualworld);
+
+	GetPlayerName(playerid, tmp, MAX_PLAYER_NAME + 1);
+	zformat_replace(bigstring, "&pn", tmp);
 
 	zformat_replace_f(bigstring, "&cpx", cpx);
 	zformat_replace_f(bigstring, "&cpy", cpy);
@@ -704,11 +744,13 @@ COMMAND:z(playerid, params[])
 	}
 	else zformat_replace(bigstring, "&c", "");
 
-	new File:FOut = fopen(FileName, io_append);
+	new File:FOut = fopen(FileName[playerid], io_append);
 
 	if(!FOut)
 	{
-		SendClientMessage(playerid, -1, "[zSave] Error: Cannot write to file.");
+		SendClientMessage(playerid, -1, "[zSave] Error: Cannot write to file. Output was printed to console.");
+
+		print(bigstring);
 
 		return 1;
 	}
@@ -767,7 +809,7 @@ DialogFormatType(playerid)
 
 	for(new i = 0; i < MAX_Z_FORMAT_TYPES; i ++) if(zfValid(i))
 	{
-		format(bigstring, sizeof(bigstring), "%s%d\t%s%s\n", bigstring, i, FormatType == i ? ("{77FF00}") : (""), FormatTypes[i][zfName]);
+		format(bigstring, sizeof(bigstring), "%s%d\t%s%s\n", bigstring, i, FormatType[playerid] == i ? ("{77FF00}") : (""), FormatTypes[i][zfName]);
 	}
 
 	ShowPlayerDialog(playerid, DID_F_SEL, DIALOG_STYLE_TABLIST_HEADERS, "Select a Format Type", bigstring, "Select", "Close");
