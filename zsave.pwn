@@ -49,7 +49,7 @@
 
 // ------------------------------------------------------------------------------------ Config/Defines
 
-#define BASE_DIALOG_ID		27000
+#define BASE_DIALOG_ID		27000 // Change this to any other number if there are conflicts with Dialog IDs
 
 #define FILE_FORMAT_TYPES 	"zsave_format_types.txt"
 #define FILE_DEFAULT_OUTPUT "zsave_default_output.txt"
@@ -68,11 +68,11 @@
 // Lock to Folder - If you don't want anyone to be able to write to files outside of a specific folder,
 //  enable this and configure the path
 #define LOCK_TO_FOLDER		false
-#define LOCK_PATH			"zsave/" // Does not exist by default!
+#define LOCK_PATH			"zsave/"
 
 // ------------------------------------------------------------------------------------ Vars & Enumerators
 
-static FormatSpecifiers[] = 
+new const FormatSpecifiers[] = 
 	"&c - Text/Comment (from /Z)\n"\
 	"\n"\
 	"&ps - Player State\n"\
@@ -103,6 +103,9 @@ static FormatSpecifiers[] =
 	"&grx  &gry  &grz - Ground Angle X, Y, Z\n"\
 	"\nNote: Specifiers that aren't available will be 0 or 0.0."
 ;
+
+// '/' is automatically restricted if LOCK_TO_FOLDER is true
+new InvalidFileSigns[] = {'\\', ':', '*', '?', '\"', '<', '>', '|'};
 
 enum
 {
@@ -200,8 +203,13 @@ public OnPlayerConnect(playerid)
 	FTmpID[playerid] = 0;
 	FTmpName[playerid][0] = 0;
 	FTmpFormat[playerid][0] = 0;
+
 	FileName[playerid][0] = 0;
+	#if LOCK_TO_FOLDER == true
+	strcat(FileName[playerid], LOCK_PATH, MAX_Z_FILENAME);
+	#endif
 	strcat(FileName[playerid], FILE_DEFAULT_OUTPUT, MAX_Z_FILENAME);
+	
 	FormatType[playerid] = -1;
 
 	return 1;
@@ -251,6 +259,8 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 			new len = strlen(inputtext);
 
 			if(!len || len > MAX_Z_FORMAT_NAME) return DialogFormatAdd(playerid);
+
+			for(new i = 0; i < len; i ++) if(inputtext[i] == ',') return DialogFormatAdd(playerid);
 
 			format(FTmpName[playerid], MAX_Z_FORMAT_NAME + 1, inputtext);
 
@@ -366,6 +376,8 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 			new len = strlen(inputtext);
 
 			if(!len || len > MAX_Z_FORMAT_NAME) return DialogFormatEditName(playerid);
+
+			for(new i = 0; i < len; i ++) if(inputtext[i] == ',') return DialogFormatEditName(playerid);
 
 			format(FTmpName[playerid], MAX_Z_FORMAT_NAME + 1, inputtext);
 
@@ -558,18 +570,41 @@ COMMAND:zfile(playerid, params[])
 		return 1;
 	}
 
-	FileName[playerid][0] = 0;
+	new len = strlen(params);
+
+	for(new i = 0; i < len; i ++) for(new j = 0; j < sizeof(InvalidFileSigns); j ++) if(params[i] == InvalidFileSigns[j])
+	{
+		new string[60 + sizeof(InvalidFileSigns) * 2];
+
+		strcat(string, "[zSave] Error: The File Name may not contain signs {FF9900}");
+
+		for(new h = 0; h < sizeof(InvalidFileSigns); h ++)
+		{
+			if(h != 0) ccat(string, ' ');
+
+			ccat(string, InvalidFileSigns[h]);
+		}
+
+		SendClientMessage(playerid, -1, string);
+
+		return 1;
+	}
 
 	#if LOCK_TO_FOLDER == true // Checks for the LOCK_TO_FOLDER define
 
-		if(strfind(params, "/", true) != -1)
+		if(strfind(params, "/", false) != -1)
 		{
-			SendClientMessage(playerid, -1, "[zSave] Error: You cannot switch folders without permission.");
+			SendClientMessage(playerid, -1, "[zSave] Error: You cannot leave the restricted directory.");
 
 			return 1;
 		}
 
+		FileName[playerid][0] = 0;
 		strcat(FileName[playerid], LOCK_PATH, MAX_Z_FILENAME); // Sets the path to the defined one
+
+	#else
+
+		FileName[playerid][0] = 0;
 
 	#endif
 
@@ -601,15 +636,6 @@ COMMAND:zformat(playerid, params[])
 		FormatType[playerid] = id;
 	}
 	else SendClientMessage(playerid, -1, "[zSave] Error: /zformat (id) - Invalid ID");
-
-	return 1;
-}
-
-COMMAND:zfedit(playerid, params[])
-{
-	if(!CheckPlayerAdmin(playerid)) return 0;
-
-	DialogFormatEditList(playerid);
 
 	return 1;
 }
@@ -748,7 +774,7 @@ COMMAND:z(playerid, params[])
 
 	if(!FOut)
 	{
-		SendClientMessage(playerid, -1, "[zSave] Error: Cannot write to file. Output was printed to console.");
+		SendClientMessage(playerid, -1, "[zSave] Error: Cannot write to file. Output printed to console.");
 
 		print(bigstring);
 
@@ -763,7 +789,7 @@ COMMAND:z(playerid, params[])
 	return 1;
 }
 
-// ------------------------------------------------------------------------------------ Replace Functions
+// ------------------------------------------------------------------------------------ Replace and String Functions
 
 zformat_replace_f(target[], specifier[], Float:value, size = sizeof target)
 {
@@ -797,6 +823,18 @@ zformat_replace(target[], specifier[], text[], size = sizeof target)
 	}
 
 	return count;
+}
+
+ccat(destination[], character, size = sizeof destination) // attaches a character
+{
+	new len = strlen(destination);
+
+	if(len >= size-1) return 0;
+
+	destination[len] = character;
+	destination[len + 1] = EOS;
+
+	return 1;
 }
 
 // ------------------------------------------------------------------------------------ Dialog Functions
